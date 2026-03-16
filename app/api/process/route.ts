@@ -67,8 +67,9 @@ export async function POST(request: NextRequest) {
       const noiseIntensity = 0.03 + Math.random() * 0.02; // 3-5%
       const noiseBuffer = await createNoiseBuffer(width, height, noiseIntensity);
       
-      // Composite noise over image
-      pipeline = pipeline.composite([{
+      // Composite noise over image - sharp composite modifies in place for some operations
+      // We need to apply it differently
+      pipeline = sharp(await pipeline.toBuffer()).composite([{
         input: noiseBuffer,
         blend: 'overlay',
       }]);
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Return the processed image
-    return new NextResponse(outputBuffer as unknown as BodyInit, {
+    return new NextResponse(outputBuffer, {
       headers: {
         'Content-Type': 'image/png',
         'Content-Disposition': 'attachment; filename="processed.png"',
