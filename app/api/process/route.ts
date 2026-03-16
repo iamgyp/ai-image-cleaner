@@ -21,63 +21,111 @@ export async function POST(request: NextRequest) {
 
     // Convert file to buffer
     const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    let currentBuffer = Buffer.from(bytes);
+
+    // 检查文件类型和大小
+    console.log('Received file:', {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+
+    // 验证输入 buffer 是否为有效的图片格式
+    try {
+      // 尝试获取元数据，如果失败则尝试转换格式
+      const metadata = await sharp(currentBuffer).metadata();
+      console.log('Image metadata:', {
+        format: metadata.format,
+        width: metadata.width,
+        height: metadata.height,
+      });
+
+      // 如果 Sharp 无法识别格式，尝试转换为 JPEG
+      if (!metadata.format) {
+        console.log('Unknown format detected, attempting to convert...');
+        const convertedBuffer = await sharp(currentBuffer, { failOnError: false })
+          .jpeg({ quality: 95 })
+          .toBuffer();
+        currentBuffer = Buffer.from(convertedBuffer);
+      }
+    } catch (metadataError) {
+      console.error('Metadata extraction error:', metadataError);
+      console.log('Attempting to convert image format...');
+
+      // 尝试将 buffer 转换为 JPEG 格式
+      try {
+        const convertedBuffer = await sharp(currentBuffer, { failOnError: false })
+          .jpeg({ quality: 95 })
+          .toBuffer();
+        currentBuffer = Buffer.from(convertedBuffer);
+        console.log('Successfully converted to JPEG format');
+      } catch (convertError) {
+        console.error('Format conversion failed:', convertError);
+        return NextResponse.json(
+          { error: 'Unsupported image format', details: String(convertError) },
+          { status: 400 }
+        );
+      }
+    }
 
     // Get original metadata
-    const metadata = await sharp(buffer).metadata();
+    const metadata = await sharp(currentBuffer).metadata();
     let width = metadata.width || 1024;
     let height = metadata.height || 1024;
-
-    // Start pipeline
-    let currentBuffer = buffer;
 
     // 1. Resample (random scale between 0.9 and 1.1)
     if (options.resample) {
       const scale = 0.9 + Math.random() * 0.2;
       width = Math.round(width * scale);
       height = Math.round(height * scale);
-      currentBuffer = await sharp(currentBuffer)
+      const resizedBuffer = await sharp(currentBuffer)
         .resize(width, height, { fit: 'fill', kernel: 'lanczos3' })
         .toBuffer();
+      currentBuffer = Buffer.from(resizedBuffer);
     }
 
     // 2. Rotate (-1 to 1 degrees)
     if (options.rotate) {
       const angle = -1 + Math.random() * 2;
-      currentBuffer = await sharp(currentBuffer)
+      const rotatedBuffer = await sharp(currentBuffer)
         .rotate(angle)
         .toBuffer();
+      currentBuffer = Buffer.from(rotatedBuffer);
     }
 
     // 3. Color space conversion
     if (options.colorSpaceConversion) {
-      currentBuffer = await sharp(currentBuffer)
+      const colorBuffer = await sharp(currentBuffer)
         .toColorspace('adobe-rgb')
         .toColorspace('srgb')
         .toBuffer();
+      currentBuffer = Buffer.from(colorBuffer);
     }
 
     // 4. Add film grain
     if (options.addFilmGrain) {
       const noiseIntensity = 0.03 + Math.random() * 0.02;
       const noiseBuffer = await createNoiseBuffer(width, height, noiseIntensity);
-      currentBuffer = await sharp(currentBuffer)
+      const grainBuffer = await sharp(currentBuffer)
         .composite([{ input: noiseBuffer, blend: 'overlay' }])
         .toBuffer();
+      currentBuffer = Buffer.from(grainBuffer);
     }
 
     // 5. Convert to PNG
-    currentBuffer = await sharp(currentBuffer)
+    const pngBuffer = await sharp(currentBuffer)
       .png({ quality: 95, compressionLevel: 6 })
       .toBuffer();
+    currentBuffer = Buffer.from(pngBuffer);
 
     // 6. Add fake EXIF data if enabled
     if (options.clearExif && options.addFakeCameraData) {
-      currentBuffer = await addFakeExifData(currentBuffer, camera);
+      const exifBuffer = await addFakeExifData(currentBuffer, camera);
+      currentBuffer = Buffer.from(exifBuffer);
     }
 
-    // Return the processed image
-    return new NextResponse(currentBuffer, {
+    // Return the processed image as Uint8Array for NextResponse
+    return new NextResponse(new Uint8Array(currentBuffer), {
       status: 200,
       headers: {
         'Content-Type': 'image/png',
@@ -107,19 +155,21 @@ async function createNoiseBuffer(width: number, height: number, intensity: numbe
     noiseData[i + 3] = Math.floor(intensity * 255 * 0.3);
   }
 
-  return await sharp(noiseData, {
+  const result = await sharp(noiseData, {
     raw: { width: noiseSize, height: noiseSize, channels: 4 },
   })
     .resize(width, height, { fit: 'fill' })
     .png()
     .toBuffer();
+  
+  return Buffer.from(result);
 }
 
 async function addFakeExifData(buffer: Buffer, camera: CameraType): Promise<Buffer> {
   const now = new Date();
   const dateStr = now.toISOString().replace(/[-:T]/g, ':').slice(0, 19);
 
-  return await sharp(buffer)
+  const result = await sharp(buffer)
     .withMetadata({
       exif: {
         IFD0: {
@@ -130,4 +180,6 @@ async function addFakeExifData(buffer: Buffer, camera: CameraType): Promise<Buff
       },
     })
     .toBuffer();
+  
+  return Buffer.from(result);
 }

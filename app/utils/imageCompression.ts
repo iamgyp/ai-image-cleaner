@@ -77,7 +77,8 @@ export async function compressImage(
       // 绘制图片
       ctx.drawImage(img, 0, 0, width, height);
 
-      // 转换为 blob
+      // 转换为 blob，确保使用正确的 MIME type
+      const mimeType = 'image/jpeg';
       canvas.toBlob(
         (blob) => {
           if (!blob) {
@@ -85,11 +86,17 @@ export async function compressImage(
             return;
           }
 
-          // 创建新的文件对象
-          const compressedFile = new File([blob], file.name, {
-            type: 'image/jpeg',
+          // 创建新的文件对象，确保 type 属性正确设置
+          const fileName = file.name.replace(/\.[^/.]+$/, '') + '.jpg';
+          const compressedFile = new File([blob], fileName, {
+            type: mimeType,
             lastModified: Date.now(),
           });
+
+          // 验证 File 对象的 type 属性
+          if (compressedFile.type !== mimeType) {
+            console.warn('File type mismatch, expected:', mimeType, 'got:', compressedFile.type);
+          }
 
           resolve({
             file: compressedFile,
@@ -98,7 +105,7 @@ export async function compressImage(
             compressionRatio: blob.size / originalSize,
           });
         },
-        'image/jpeg',
+        mimeType,
         opts.quality
       );
     };
