@@ -5,7 +5,8 @@ import UploadZone from './components/UploadZone';
 import ProcessOptionsPanel from './components/ProcessOptions';
 import ImageComparison from './components/ImageComparison';
 import { ProcessOptions, DEFAULT_OPTIONS } from './types';
-import { Shield, Sparkles, AlertCircle } from 'lucide-react';
+import { CompressionResult } from './utils/imageCompression';
+import { Shield, Sparkles, AlertCircle, Image as ImageIcon } from 'lucide-react';
 
 export default function Home() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -15,11 +16,13 @@ export default function Home() {
   const [selectedCamera, setSelectedCamera] = useState('iphone15');
   const [error, setError] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [compressionInfo, setCompressionInfo] = useState<CompressionResult | null>(null);
 
-  const handleImageUpload = useCallback((file: File) => {
+  const handleImageUpload = useCallback((file: File, compressionResult?: CompressionResult) => {
     setError(null);
     setUploadedFile(file);
-    
+    setCompressionInfo(compressionResult || null);
+
     // Create preview URL
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -46,16 +49,30 @@ export default function Home() {
         body: formData,
       });
 
+      // 处理 413 错误
+      if (response.status === 413) {
+        throw new Error('图片过大，请尝试上传更小的图片（建议不超过 4MB）');
+      }
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Processing failed');
+        let errorMessage = '处理失败';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // 如果无法解析 JSON，使用状态文本
+          errorMessage = response.statusText || `HTTP ${response.status}`;
+        }
+        throw new Error(errorMessage);
       }
 
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       setProcessedImage(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      const errorMessage = err instanceof Error ? err.message : '处理时发生错误';
+      setError(errorMessage);
+      console.error('处理错误:', err);
     } finally {
       setIsProcessing(false);
     }
@@ -65,6 +82,7 @@ export default function Home() {
     setOriginalImage(null);
     setProcessedImage(null);
     setUploadedFile(null);
+    setCompressionInfo(null);
     setError(null);
     setOptions(DEFAULT_OPTIONS);
   };
@@ -105,9 +123,9 @@ export default function Home() {
                 让你的图片看起来更像真实拍摄的照片
               </p>
             </div>
-            
+
             <UploadZone onImageUpload={handleImageUpload} />
-            
+
             <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
               <div className="p-4 bg-gray-800/30 rounded-xl border border-gray-700/50">
                 <div className="text-2xl font-bold text-blue-400 mb-1">8+</div>
@@ -122,8 +140,8 @@ export default function Home() {
                 <div className="text-xs text-gray-500">处理步骤</div>
               </div>
               <div className="p-4 bg-gray-800/30 rounded-xl border border-gray-700/50">
-                <div className="text-2xl font-bold text-orange-400 mb-1">0</div>
-                <div className="text-xs text-gray-500">数据上传</div>
+                <div className="text-2xl font-bold text-orange-400 mb-1">&lt;4MB</div>
+                <div className="text-xs text-gray-500">自动压缩</div>
               </div>
             </div>
           </div>
@@ -138,19 +156,40 @@ export default function Home() {
                 selectedCamera={selectedCamera}
                 onCameraChange={setSelectedCamera}
               />
-              
+
+              {/* 压缩信息 */}
+              {compressionInfo && compressionInfo.compressionRatio < 1 && (
+                <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ImageIcon className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm font-medium text-blue-300">图片已自动压缩</span>
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    原始大小: {(compressionInfo.originalSize / 1024 / 1024).toFixed(2)} MB
+                    → {(compressionInfo.compressedSize / 1024 / 1024).toFixed(2)} MB
+                  </div>
+                </div>
+              )}
+
               {error && (
                 <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-red-300">{error}</p>
+                  <div className="flex-1">
+                    <p className="text-sm text-red-300">{error}</p>
+                    {error.includes('过大') && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        提示：请尝试上传更小的图片，或刷新页面重试
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
-              
+
               {!processedImage && (
                 <button
                   onClick={handleProcess}
                   disabled={isProcessing}
-                  className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 
+                  className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
                            disabled:cursor-not-allowed text-white font-semibold rounded-xl
                            transition-all duration-200 shadow-lg shadow-blue-500/20
                            flex items-center justify-center gap-2"
