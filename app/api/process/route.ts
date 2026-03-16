@@ -71,7 +71,6 @@ export async function POST(request: NextRequest) {
       pipeline = pipeline.composite([{
         input: noiseBuffer,
         blend: 'overlay',
-        opacity: 0.5,
       }]);
     }
 
@@ -89,7 +88,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Return the processed image
-    return new NextResponse(outputBuffer, {
+    return new NextResponse(outputBuffer as unknown as BodyInit, {
       headers: {
         'Content-Type': 'image/png',
         'Content-Disposition': 'attachment; filename="processed.png"',
